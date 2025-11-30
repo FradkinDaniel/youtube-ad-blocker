@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "YT ads skippper",
+  "version": "1.0",
+  "description": "Auto-skip ads instantly using 0-second glitch logic",
+  "permissions": ["scripting"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}
