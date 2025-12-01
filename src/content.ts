@@ -1,6 +1,5 @@
 // src/content.ts
 
-// 1. Types
 interface SponsorSegment {
     segment: [number, number];
     category: string;
@@ -11,7 +10,7 @@ interface VideoWithSkipper extends HTMLVideoElement {
     hasSponsorSkipper?: boolean;
 }
 
-console.log("YT Ultimate Skipper: Aggressive Mode");
+console.log("YT Skipper: Multi-Selector Clicker");
 
 let currentVideoId: string = "";
 let currentSegments: SponsorSegment[] = [];
@@ -23,66 +22,38 @@ const getVideoID = (): string | null => {
 };
 
 const showToast = (message: string) => {
+    if (document.querySelector('.yt-skipper-toast')) return;
     const toast = document.createElement('div');
+    toast.className = 'yt-skipper-toast';
     toast.innerText = message;
     Object.assign(toast.style, {
-        position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
-        backgroundColor: '#212121', color: '#fff', padding: '12px 24px', borderRadius: '25px',
-        zIndex: '9999', fontSize: '14px', boxShadow: '0 4px 6px rgba(0,0,0,0.3)', pointerEvents: 'none',
-        fontFamily: 'Roboto, Arial, sans-serif'
+        position: 'fixed', bottom: '100px', left: '50%', transform: 'translateX(-50%)',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)', color: '#fff', padding: '10px 20px', borderRadius: '50px',
+        zIndex: '9999', fontSize: '14px', pointerEvents: 'none', fontWeight: 'bold'
     });
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2500);
+    setTimeout(() => toast.remove(), 2000);
 };
 
-// --- SPONSOR DATA ---
+// --- SPONSOR FETCH ---
 const fetchSponsorSegments = async (videoId: string) => {
     if (videoId === currentVideoId) return;
     currentVideoId = videoId;
     currentSegments = []; 
-
     try {
         const response = await fetch(
             `https://sponsor.ajay.app/api/skipSegments?videoID=${videoId}&categories=["sponsor"]`
         );
         if (response.ok) {
             currentSegments = await response.json();
-            console.log("Sponsors loaded:", currentSegments.length);
         }
-    } catch { 
-        console.log("No sponsor data.");
-    }
+    } catch { /* ignore */ }
 };
 
-// --- THE CORE LOOP (Runs constantly) ---
-const handleTimeUpdate = (video: HTMLVideoElement) => {
-    // === PRIORITY 1: KILL ADS INSTANTLY ===
-    // We check this inside the time loop for maximum speed
-    const adShowing = document.querySelector('.ad-showing');
-    
-    if (adShowing) {
-        // 1. Mute
-        video.muted = true;
-        
-        // 2. Fast Forward
-        if (isFinite(video.duration)) {
-             video.currentTime = video.duration;
-        }
-        
-        // 3. Click Buttons (Brute Force)
-        const skipBtn = document.querySelector('.ytp-ad-skip-button') as HTMLElement;
-        const skipBtnModern = document.querySelector('.ytp-ad-skip-button-modern') as HTMLElement;
-        if (skipBtn) skipBtn.click();
-        if (skipBtnModern) skipBtnModern.click();
-
-        // If ad is active, we stop here. Do not process sponsors.
-        return;
-    }
-
-    // === PRIORITY 2: SKIP SPONSORS ===
+// --- SPONSOR SKIPPER ---
+const handleSponsorSkip = (video: HTMLVideoElement) => {
     if (currentSegments.length === 0) return;
     const currentTime = video.currentTime;
-
     for (const seg of currentSegments) {
         const [start, end] = seg.segment;
         if (currentTime >= start && currentTime < end - 0.5) {
@@ -92,35 +63,100 @@ const handleTimeUpdate = (video: HTMLVideoElement) => {
     }
 };
 
-// --- SETUP ---
-const runSkipper = () => {
-  const video = document.querySelector('video') as VideoWithSkipper | null;
+// --- HELPER: CLICK ANY BUTTON ---
+const clickSkipButton = () => {
+    // List of every known Skip Button class name
+    const selectors = [
+        '.ytp-ad-skip-button',
+        '.ytp-ad-skip-button-modern',
+        '.videoAdUiSkipButton',
+        '.ytp-skip-ad-button',
+        '.ytp-ad-skip-button-slot', 
+        '.ytp-ad-skip-button-container',
+        '.ytp-skip-ad-button modern ytp-button'
+    ];
 
-  // 1. Check for new video ID (Navigation)
-  const videoId = getVideoID();
-  if (videoId && videoId !== currentVideoId) {
-      fetchSponsorSegments(videoId);
-  }
-
-  // 2. Attach The Loop
-  // This is the secret. We attach our logic to the video's internal clock.
-  if (video && !video.hasSponsorSkipper) {
-      video.ontimeupdate = () => handleTimeUpdate(video);
-      video.hasSponsorSkipper = true;
-  }
+    // Try to find ANY of them
+    for (const selector of selectors) {
+        const btn = document.querySelector(selector) as HTMLElement;
+        if (btn) {
+            btn.click();
+            return true; // Stop looking if we clicked one
+        }
+    }
+    return false;
 };
 
-// --- WATCHER ---
+// --- AD KILLER ---
+const killAd = () => {
+    const video = document.querySelector('video');
+    if (!video) return;
+
+    // Detection
+    const adOverlay = document.querySelector('.ytp-ad-player-overlay');
+    const playerAdClass = document.querySelector('.ad-showing');
+    const isAd = adOverlay || playerAdClass;
+
+    if (isAd) {
+        // 1. Mute
+        video.muted = true;
+
+        // 2. Speed Up (16x)
+        if (video.playbackRate !== 16.0) {
+            video.playbackRate = 16.0;
+        }
+
+        // 3. Try to click Skip Button
+        clickSkipButton();
+    } 
+    else {
+        // Reset speed if content is playing
+        if (video.playbackRate === 16.0) {
+            video.playbackRate = 1.0;
+        }
+    }
+
+    // Cleanup Banner Ads
+    const popupCloseBtn = document.querySelector('.ytp-ad-overlay-close-button') as HTMLElement;
+    if (popupCloseBtn) popupCloseBtn.click();
+};
+
+// --- OBSERVER ---
 const observer = new MutationObserver(() => {
-    runSkipper();
-    
-    // Banner remover
-    const overlay = document.querySelector('.ytp-ad-overlay-close-button') as HTMLElement;
-    if (overlay) overlay.click();
-    
-    // Hide static ads via CSS (inline check)
-    const adSlots = document.querySelectorAll('.ytd-ad-slot-renderer');
-    adSlots.forEach(slot => (slot as HTMLElement).style.display = 'none');
+    killAd();
+
+    const video = document.querySelector('video') as VideoWithSkipper | null;
+    if (video) {
+        const videoId = getVideoID();
+        if (videoId && videoId !== currentVideoId) {
+            fetchSponsorSegments(videoId);
+        }
+        
+        if (!video.hasSponsorSkipper) {
+            video.ontimeupdate = () => handleSponsorSkip(video);
+            video.hasSponsorSkipper = true;
+        }
+    }
 });
 
-observer.observe(document.body, { childList: true, subtree: true });
+observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+
+// --- CSS CURTAIN ---
+// NOTE: I changed "display: none" to "opacity: 0" for the overlay.
+// This keeps the button clickable even if you can't see it.
+const style = document.createElement('style');
+style.innerHTML = `
+    /* Hide Video Content */
+    .html5-video-player:has(.ytp-ad-player-overlay) video { opacity: 0 !important; }
+    .ad-showing video { opacity: 0 !important; }
+
+    /* Hide Ad UI (Make invisible but keep clickable) */
+    .ytp-ad-player-overlay,
+    .ytp-ad-overlay-container, 
+    #player-ads,
+    ytd-ad-slot-renderer { 
+        opacity: 0 !important;
+        pointer-events: none; /* Let clicks pass through if needed, but we handle clicks in JS */
+    }
+`;
+document.head.appendChild(style);
